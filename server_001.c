@@ -16,7 +16,7 @@
 #include <arpa/inet.h>
  
 #define MYPORT 1234 //连接时使用的端口
-#define MAXCLINE 5 //连接队列中的个数
+#define MAXCLINE 2 //连接队列中的个数
 #define BUF_SIZE 200
  
 int fd[MAXCLINE]; //连接的fd
@@ -108,7 +108,8 @@ int main(void)
             }
         }
         //如果文件描述符中有连接请求 会做相应的处理，实现I/O的复用 多用户的连接通讯
-        ret = select(maxsock +1,&fdsr,NULL,NULL,&tv);
+        //ret = select(maxsock +1,&fdsr,NULL,NULL,&tv);
+        ret = select(sock_fd +1,&fdsr,NULL,NULL,&tv);
         if(ret <0) //没有找到有效的连接 失败
         {
             perror("select error!\n");
@@ -150,10 +151,25 @@ int main(void)
             new_fd = accept(sock_fd,(struct sockaddr *)&client_addr,&sin_size);
             if(new_fd <=0)
             {
-            perror("accept error\n");
-            continue;
+                perror("accept error\n");
+                continue;
             }
+            #if 1
+                pthread_t recv_id;
+				pthread_attr_t attr;
+
+                s_param.clientfd = new_fd;
+                s_param.clientip = inet_addr(inet_ntoa(client_addr.sin_addr));
+
+                pthread_attr_init(&attr); 
+				pthread_attr_setdetachstate(&attr, 1);
+				pthread_attr_setstacksize(&attr, STACK_SIZE);
+				ret = pthread_create(&recv_id, &attr, commonclient_pth, &s_param);
+				pthread_attr_destroy(&attr);
+             #endif
+
             //添加新的fd 到数组中 判断有效的连接数是否小于最大的连接数，如果小于的话，就把新的连接套接字加入集合
+            #if 0
             if(conn_amount <MAXCLINE)
             {
                 for(i=0;i< MAXCLINE;i++)
@@ -192,6 +208,7 @@ int main(void)
                 close(new_fd);
                 continue;
             }
+            #endif
         }
         //showclient();
       }
@@ -248,19 +265,22 @@ void *commonclient_pth(void *data)
             ret = recv(clientfd, recvbuff + recvsize, 128 - recvsize, 0);        
             if(ret < 0)
 			{
-                //printf("client  close\n");
+                printf("\r\n zmy client  close\n");
                // close(clientfd);
                 //FD_CLR(clientfd,&rdRd);
             
+                #if  0
 				if(errno == EAGAIN)
 				{
 					continue;
 				}
 
 				break;
+                #endif
 			}
 			else if(ret == 0)
 			{
+                printf("\r\n zmy ret = 0");
 				//VAVAHAL_Print(LOG_LEVEL_DEBUG, "[%s][%d]: client exit [channel - %d][%s]\n", FUN, LINE, channel, ip_str);
 				break;
 			}
