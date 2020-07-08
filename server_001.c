@@ -43,6 +43,8 @@ void showclient()
     }
     printf("\n\n");
 }
+
+
 int main(void)
 {
     int sock_fd,new_fd; //监听套接字 连接套接字
@@ -90,13 +92,13 @@ int main(void)
     sin_size = sizeof(client_addr);
     maxsock = sock_fd;
     while(1)
-     {
+    {
         //初始化文件描述符集合
         FD_ZERO(&fdsr); //清除描述符集
         FD_SET(sock_fd,&fdsr); //把sock_fd加入描述符集
         //超时的设定
-        tv.tv_sec = 30;
-        tv.tv_usec =0;
+        tv.tv_sec  = 0;
+        tv.tv_usec = 500000;
         //添加活动的连接
         for(i=0;i<MAXCLINE;i++) 
         {
@@ -148,8 +150,8 @@ int main(void)
             new_fd = accept(sock_fd,(struct sockaddr *)&client_addr,&sin_size);
             if(new_fd <=0)
             {
-                perror("accept error\n");
-                continue;
+            perror("accept error\n");
+            continue;
             }
             //添加新的fd 到数组中 判断有效的连接数是否小于最大的连接数，如果小于的话，就把新的连接套接字加入集合
             if(conn_amount <MAXCLINE)
@@ -158,13 +160,18 @@ int main(void)
                 {
                     if(fd[i]==0)
                     {
-                        fd[i] = new_fd;
-                        break;
+                    fd[i] = new_fd;
+                    break;
                     }
                 }
                 conn_amount++;
                 printf("new connection client[%d]%s:%d\n",conn_amount,inet_ntoa(client_addr.sin_addr),ntohs(client_addr.sin_port));
+                if(new_fd > maxsock)
+                {
+                    maxsock = new_fd;
+                }
 
+                #if 1
                 pthread_t recv_id;
 				pthread_attr_t attr;
 
@@ -176,11 +183,7 @@ int main(void)
 				pthread_attr_setstacksize(&attr, STACK_SIZE);
 				ret = pthread_create(&recv_id, &attr, commonclient_pth, &s_param);
 				pthread_attr_destroy(&attr);
-
-                if(new_fd > maxsock)
-                {
-                    maxsock = new_fd;
-                }
+                #endif
             }
             else
             {
@@ -190,29 +193,97 @@ int main(void)
                 continue;
             }
         }
-        showclient();
-    }
+        //showclient();
+      }
  
-    for(i=0;i<MAXCLINE;i++)
-    {
+      for(i=0;i<MAXCLINE;i++)
+      {
         if(fd[i]!=0)
         {
-            close(fd[i]);
+          close(fd[i]);
         }
-    }   
-    exit(0);
-} 
+      }
+      
+      exit(0);
+  } 
+
+
 
 //处理client 端过来的数据
 void *commonclient_pth(void *data)
 {
     fd_set rdRd;
+    char recvbuff[128];
+    int ret;
+    int recvsize;
+    struct timeval timeout;
+    int clientfd; 
 
     ServerParam *sp = (ServerParam *)data;
 
+    clientfd = sp->clientfd;
+
+    while(1)
+    {
+        FD_ZERO(&rdRd);
+		FD_SET(clientfd, &rdRd);        
+
+        timeout.tv_sec = 0;				
+		timeout.tv_usec = 500000;
+
+        
+		ret = select(clientfd + 1, &rdRd, NULL, NULL, &timeout);
+        if(ret < 0)
+		{
+			//VAVAHAL_Print(LOG_LEVEL_WARING, "[%s][%d]: select err, channel - %d\n", FUN, LINE, channel);
+			break;
+		}
+		else if(ret == 0)
+		{
+			continue;  //timeout
+		}
+
+        if(FD_ISSET(clientfd, &rdRd))
+        {
+            ret = recv(clientfd, recvbuff + recvsize, 128 - recvsize, 0);        
+            if(ret < 0)
+			{
+                //printf("client  close\n");
+               // close(clientfd);
+                //FD_CLR(clientfd,&rdRd);
+            
+				if(errno == EAGAIN)
+				{
+					continue;
+				}
+
+				break;
+			}
+			else if(ret == 0)
+			{
+				//VAVAHAL_Print(LOG_LEVEL_DEBUG, "[%s][%d]: client exit [channel - %d][%s]\n", FUN, LINE, channel, ip_str);
+				break;
+			}
+
+            printf("\r\n zmy %s",recvbuff);
+
+            #if 0
+			recvsize += ret;
+            while(1)
+            {
+                if(recvsize < 128)
+				{
+					break;
+				}
+                printf("\r\n zmy %d",recvsize);
 
 
+            }
+            #endif
+            
+        }
 
+    }
 
 
 
