@@ -2,7 +2,10 @@
 1. 程序使用了一个数组fd，通信开始后把需要通信的多个socket描述符都放入此数组
 2. 首先生成一个叫sock_fd的socket描述符，用于监听端口。
 3. 将sock_fd和数组fd中不为0的描述符放入select将检查的集合fdsr。
-4. 处理fdsr中可以接收数据的连接。如果是sock_fd，表明有新连接加入，将新加入连接的socket描述符放置到fd。 */ 
+4. 处理fdsr中可以接收数据的连接。如果是sock_fd，表明有新连接加入，将新加入连接的socket描述符放置到fd。
+5. 添加新的fd 到数组中 判断有效的连接数是否小于最大的连接数，如果小于的话，就把新的连接套接字加入集合
+6. 线程是使用的分离线程方式，程序运行结束后即可以释放资源不用单独释放
+ */ 
 // select_server.c
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,6 +103,7 @@ int main(void)
         tv.tv_sec  = 0;
         tv.tv_usec = 500000;
         //添加活动的连接
+        #if 0
         for(i=0;i<MAXCLINE;i++) 
         {
             if(fd[i]!=0)
@@ -107,10 +111,11 @@ int main(void)
                 FD_SET(fd[i],&fdsr);
             }
         }
+        #endif
         //如果文件描述符中有连接请求 会做相应的处理，实现I/O的复用 多用户的连接通讯
         //ret = select(maxsock +1,&fdsr,NULL,NULL,&tv);
-        ret = select(sock_fd +1,&fdsr,NULL,NULL,&tv);
-        if(ret <0) //没有找到有效的连接 失败
+        ret = select(maxsock +1,&fdsr,NULL,NULL,&tv);
+        if(ret < 0) //没有找到有效的连接 失败
         {
             perror("select error!\n");
             break;
@@ -168,7 +173,7 @@ int main(void)
 				pthread_attr_destroy(&attr);
              #endif
 
-            //添加新的fd 到数组中 判断有效的连接数是否小于最大的连接数，如果小于的话，就把新的连接套接字加入集合
+           
             #if 0
             if(conn_amount <MAXCLINE)
             {
@@ -213,6 +218,7 @@ int main(void)
         //showclient();
       }
  
+ #if 0
       for(i=0;i<MAXCLINE;i++)
       {
         if(fd[i]!=0)
@@ -220,9 +226,9 @@ int main(void)
           close(fd[i]);
         }
       }
-      
+#endif  
       exit(0);
-  } 
+} 
 
 
 
@@ -248,16 +254,16 @@ void *commonclient_pth(void *data)
         timeout.tv_sec = 0;				
 		timeout.tv_usec = 500000;
 
-        
 		ret = select(clientfd + 1, &rdRd, NULL, NULL, &timeout);
         if(ret < 0)
 		{
 			//VAVAHAL_Print(LOG_LEVEL_WARING, "[%s][%d]: select err, channel - %d\n", FUN, LINE, channel);
+            printf("\r\n zmy select err \r\n");
 			break;
 		}
 		else if(ret == 0)
 		{
-			continue;  //timeout
+			continue;       //timeout
 		}
 
         if(FD_ISSET(clientfd, &rdRd))
@@ -265,18 +271,11 @@ void *commonclient_pth(void *data)
             ret = recv(clientfd, recvbuff + recvsize, 128 - recvsize, 0);        
             if(ret < 0)
 			{
-                printf("\r\n zmy client  close\n");
-               // close(clientfd);
-                //FD_CLR(clientfd,&rdRd);
-            
-                #if  0
 				if(errno == EAGAIN)
 				{
 					continue;
 				}
-
 				break;
-                #endif
 			}
 			else if(ret == 0)
 			{
@@ -286,7 +285,7 @@ void *commonclient_pth(void *data)
 			}
 
             printf("\r\n zmy %s",recvbuff);
-
+            //使用心跳机制 超过五次没有数据 断开socket 避免同一个客户端多次连接
             #if 0
 			recvsize += ret;
             while(1)
@@ -296,16 +295,11 @@ void *commonclient_pth(void *data)
 					break;
 				}
                 printf("\r\n zmy %d",recvsize);
-
-
             }
             #endif
-            
         }
-
     }
 
-
-
-
+    close(clientfd);
+    return NULL;
 }
