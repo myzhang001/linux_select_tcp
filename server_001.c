@@ -17,6 +17,18 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/ip_icmp.h>
+#include <net/if.h>
+#include <net/if_arp.h>
+#include <arpa/inet.h>
+#include <asm/types.h>
+#include <linux/ioctl.h>
+#include <linux/input.h>
+#include <linux/sysinfo.h>
+#include <linux/netlink.h>
  
 #define MYPORT 1234 //连接时使用的端口
 #define MAXCLINE 2 //连接队列中的个数
@@ -46,6 +58,74 @@ void showclient()
     }
     printf("\n\n");
 }
+
+int from_socket_get_mac( int sock_fd, char *mac, const char* net_card_name ) 
+{ 
+    struct arpreq arpreq; 
+    struct sockaddr_in dstadd_in; 
+    socklen_t  len = sizeof( struct sockaddr_in ); 
+    memset( &arpreq, 0, sizeof( struct arpreq )); 
+    memset( &dstadd_in, 0, sizeof( struct sockaddr_in ));  
+    if( getpeername( sock_fd, (struct sockaddr*)&dstadd_in, &len ) < 0 ) 
+    { 
+       //perror( "get peer name wrong, %s/n", strerror(errno)); 
+        return -1; 
+    } 
+    else 
+    { 
+        memcpy( ( struct sockaddr_in * )&arpreq.arp_pa, ( struct sockaddr_in * )&dstadd_in, sizeof( struct sockaddr_in )); 
+        strcpy(arpreq.arp_dev, net_card_name); 
+        arpreq.arp_pa.sa_family = AF_INET; 
+        arpreq.arp_ha.sa_family = AF_UNSPEC; 
+        if( ioctl( sock_fd, SIOCGARP, &arpreq ) < 0 ) 
+        { 
+            //perror( "ioctl SIOCGARP wrong, %s/n", strerror(errno) ); 
+            printf("ioctl SIOCGARP wrong");
+            return -1; 
+        } 
+        else 
+        { 
+            unsigned char* ptr = (unsigned char *)arpreq.arp_ha.sa_data; 
+			memcpy(mac,ptr,6);
+		} 
+     } 
+     return 0; 
+}
+
+int getpeermac(int sockfd, char *buf) 
+{
+	struct arpreq arpreq; 
+	struct sockaddr_in dstadd_in; 
+	socklen_t len;
+	unsigned char* ptr = NULL; 
+
+	len = sizeof(struct sockaddr_in);
+	memset(&arpreq, 0, sizeof(struct arpreq)); 
+	memset(&dstadd_in, 0, sizeof(struct sockaddr_in)); 
+
+	if(getpeername(sockfd, (struct sockaddr*)&dstadd_in, &len) < 0)
+	{
+		//VAVAHAL_Print(LOG_LEVEL_ERR, "[%s][%d]: getpeername err\n", FUN, LINE);
+		return -1;
+	}
+
+	memcpy(&arpreq.arp_pa, &dstadd_in, sizeof(struct sockaddr_in));
+	strcpy(arpreq.arp_dev, "wlp5s0");//wlp5s0
+	arpreq.arp_pa.sa_family = AF_INET; 
+	arpreq.arp_ha.sa_family = AF_UNSPEC;
+	if(ioctl(sockfd, SIOCGARP, &arpreq) < 0)
+	{
+		//VAVAHAL_Print(LOG_LEVEL_ERR, "[%s][%d]: ioctrl err\n", FUN, LINE);
+        printf("error get peermac");
+		return -1;
+	}
+
+	ptr = (unsigned char *)arpreq.arp_ha.sa_data;
+	sprintf(buf, "%02X:%02X:%02X:%02X:%02X:%02X", *ptr, *(ptr+1), *(ptr+2), *(ptr+3), *(ptr+4), *(ptr+5)); 
+
+	return 0;
+}
+
 
 
 int main(void)
@@ -123,6 +203,7 @@ int main(void)
         else if(ret ==0)// 指定的时间到，
         {
             //printf("timeout \n");
+           
             continue;
         }
         //循环判断有效的连接是否有数据到达
@@ -159,21 +240,25 @@ int main(void)
                 perror("accept error\n");
                 continue;
             }
-            #if 1
+
+ 	        s_param.clientfd = new_fd;
+			s_param.clientip = inet_addr(inet_ntoa(client_addr.sin_addr));
+			memset(s_param.mac, 0, 18);
+			ret = getpeermac(s_param.clientfd, s_param.mac);
+            if(ret == 0)
+            {
+
+                printf("\r\n zmy ---- ok%s ---------",&s_param.mac[0]);
+                #if 1
                 pthread_t recv_id;
-				pthread_attr_t attr;
-
-                s_param.clientfd = new_fd;
-                s_param.clientip = inet_addr(inet_ntoa(client_addr.sin_addr));
-
+                pthread_attr_t attr;
                 pthread_attr_init(&attr); 
-				pthread_attr_setdetachstate(&attr, 1);
-				pthread_attr_setstacksize(&attr, STACK_SIZE);
-				ret = pthread_create(&recv_id, &attr, commonclient_pth, &s_param);
-				pthread_attr_destroy(&attr);
-             #endif
-
-           
+                pthread_attr_setdetachstate(&attr, 1);
+                pthread_attr_setstacksize(&attr, STACK_SIZE);
+                ret = pthread_create(&recv_id, &attr, commonclient_pth, &s_param);
+                pthread_attr_destroy(&attr);
+                #endif
+            }
             #if 0
             if(conn_amount <MAXCLINE)
             {
@@ -241,10 +326,25 @@ void *commonclient_pth(void *data)
     int recvsize;
     struct timeval timeout;
     int clientfd; 
+    int clientip;
+    char clientmac[18];
+    char ip_str[16];
 
     ServerParam *sp = (ServerParam *)data;
 
     clientfd = sp->clientfd;
+
+    clientip = sp->clientip;
+	memset(clientmac, 0, 18);
+	strcpy(clientmac, sp->mac);
+
+	memset(ip_str, 0, 16);
+	sprintf(ip_str, "%d.%d.%d.%d", (clientip & 0x000000FF),
+	                               (clientip & 0x0000FF00) >> 8,
+	                               (clientip & 0x00FF0000) >> 16,
+	                               (clientip & 0xFF000000) >> 24);
+
+
 
     while(1)
     {
